@@ -1,0 +1,133 @@
+# zhuf
+
+`zhuf` is a high-performance key-value command-line shuffling utility written in Zig 0.16.0. It processes streams or files, tokenizes them by custom delimiters, and rearranges items using either pseudo-random generators or multi-round deterministic card-shuffling algorithms.
+
+---
+
+## Features
+
+* **Key-Value Options Interface**: Direct `key=value` CLI syntax with support for `dd`-style size suffixes (`k`, `M`, `G`, `b`).
+* **Flexible I/O Handling**: Stream directly from `stdin` / `stdout` or specify input/output files (`if=...`, `of=...`).
+* **Custom Token Delimiters**: Split inputs on any custom single character, default newlines (`\n`), or null bytes (`delimiter=null`).
+* **Pseudo-Random Shuffling**: Fast PRNG algorithms (`xoroshiro128`, `xoshiro256`, or default PRNG) with customizable or secure fallback seeding.
+* **Deterministic Shuffling**: Multi-pass algorithms (`milk`, `monge`, `faro`) with optional iteration counts (e.g., `algo=milk:5`).
+* **Output Limit & Formatting Control**: Limit output count (`count=N`, supports size suffixes) and omit trailing newlines (`-n`).
+
+The `dd`-style size suffixes are a quirky leftover from a previous project.
+
+---
+
+## Requirements
+
+* **Zig Compiler**: Version `0.16.0`.
+
+---
+
+## Building from Source
+
+Build `zhuf` using the Zig toolchain:
+
+```bash
+zig build -Doptimize=ReleaseFast
+```
+
+This will create the binary in `zig-out/bin`.
+
+---
+
+## Installation
+
+The current recommendation is to simply create a symlink in a directory in your `PATH`.
+Example for systems based on Debian:
+
+```bash
+# make sure you are in the project's main directory
+ln -s "$PWD/zig-out/bin/zhuf" ~/bin/zhuf
+```
+
+To uninstall delete the above created symlink:
+
+```bash
+rm -v ~/bin/zhuf
+```
+
+---
+
+## Usage Syntax
+
+```bash
+zhuf [options] [-n | -nonewline] [-h | -help]
+```
+
+### Options (`key=value`)
+
+| Option | Type / Format | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `if` | `<path>` | `stdin` | Input file path. |
+| `of` | `<path>` | `stdout` | Output file path. |
+| `seed` | `<u64>` | *urandom* | PRNG seed value. |
+| `count` | `<usize>` | *All* | Maximum number of shuffled items to output. Supports size suffixes. |
+| `delimiter` | `<char\|null>` | `\n` | Token delimiter. Pass either single character or `null` for `\0`. |
+| `algo` | `<algorithm>` | *Default PRNG* | Select shuffle algorithm (see below). |
+
+### Flags
+
+| Flag | Short | Description |
+| :--- | :--- | :--- |
+| `-nonewline` | `-n` | Omit trailing newline at the end of output. |
+| `-help` | `-h` | Display usage options and exit. |
+
+---
+
+## Shuffle Algorithms
+
+### 1. Pseudo-Random Algorithms
+Random shuffles run in a single pass using standard Fisher-Yates array shuffling.
+
+* **`xoroshiro128`**: Shuffles using the 64-bit `Xoroshiro128` generator.
+* **`xoshiro256`**: Shuffles using the 64-bit `Xoshiro256` generator.
+* *(omitted)*: Default fallback uses Zig's standard default PRNG.
+
+The PRNGs are initialized with system OS entropy unless a seed is specified.
+If system OS entropy is not available, a clock timestamp is used instead.
+
+### 2. Deterministic Multi-Round Algorithms
+Deterministic algorithms rearrange items according to precise mathematical permutation patterns. You can specify an optional iteration count using `:N` (e.g., `algo=monge:3`). Custom PRNG seeds are ignored by these algorithms.
+
+* **`milk`**: Interleaves elements working from the outer edges inwards towards the middle.
+* **`monge`**: Monge's shuffle; alternates placing elements between the front and back of the array.
+* **`faro`**: Perfect out-shuffle interleaving the top and bottom halves of the sequence.
+
+---
+
+## Examples
+
+### Basic Pipe Shuffling
+Shuffle lines from standard input:
+```bash
+seq 1 10 | zhuf
+```
+
+### Custom Delimiters and Output Limit
+Shuffle comma-separated values and output only 3 items:
+```bash
+echo -ne "apple,banana,cherry,date,fig" | zhuf delimiter="," count=3
+```
+
+### Deterministic Multi-Pass Shuffle
+Apply 4 rounds of the Milk shuffle algorithm to a file:
+```bash
+zhuf if=deck.txt of=shuffled.txt algo=milk:4
+```
+
+### Seeded Pseudo-Random Shuffle
+Use `xoshiro256` with a fixed seed for reproducible shuffles:
+```bash
+zhuf if=test.txt seed=98765 algo=xoshiro256
+```
+
+### Null-Terminated Input (`xargs` integration)
+Shuffle null-delimited tokens:
+```bash
+find . -type f -print0 | zhuf delimiter=null | tr '\0' '\n'
+```
