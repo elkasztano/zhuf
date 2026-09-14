@@ -71,3 +71,46 @@ pub fn writeFromBufferBuffered(
         try writer.flush();
     }
 }
+
+/// Tokenizes 'input' in-place by replacing 'delim_char' occurrences with null bytes.
+/// Expects 'input' to end with an artificial trailing null-terminator at 'input.len - 1'.
+pub fn tokenizeInPlace(
+    allocator: std.mem.Allocator,
+    tokens: *std.ArrayListUnmanaged([*:0]const u8),
+    input: []u8,
+    delim_char: u8,
+) !void {
+    if (input.len == 0) return;
+
+    const parseable_slice = input[0 .. input.len - 1];
+
+    var in_token = false;
+    var token_start: usize = 0;
+
+    for (parseable_slice, 0..) |char, i| {
+        if (char == delim_char) {
+
+            // avoid unnecessary memory operation in case the elements in
+            // 'input' are already null separated
+            if (delim_char != 0) {
+                input[i] = 0;
+            }
+
+            if (in_token) {
+                const ptr: [*:0]const u8 = @ptrCast(&input[token_start]);
+                try tokens.append(allocator, ptr);
+                in_token = false;
+            }
+        } else {
+            if (!in_token) {
+                token_start = i;
+                in_token = true;
+            }
+        }
+    }
+
+    if (in_token) {
+        const ptr: [*:0]const u8 = @ptrCast(&input[token_start]);
+        try tokens.append(allocator, ptr);
+    }
+}

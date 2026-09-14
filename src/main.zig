@@ -83,34 +83,7 @@ pub fn main(init: std.process.Init) !void {
     const estimated_tokens = input.len / 7;
     try tokens.ensureTotalCapacity(allocator, estimated_tokens);
 
-    // Tokenize all characters up to (but not including) our artificial trailing null-terminator
-    const parseable_slice = input[0 .. input.len - 1];
-
-    var in_token = false;
-    var token_start: usize = 0;
-
-    for (parseable_slice, 0..) |char, i| {
-        if (char == delim_char) {
-            input[i] = 0;
-            if (in_token) {
-                const ptr: [*:0]const u8 = @ptrCast(&input[token_start]);
-                try tokens.append(allocator, ptr);
-                in_token = false;
-            }
-        } else {
-            if (!in_token) {
-                token_start = i;
-                in_token = true;
-            }
-        }
-    }
-
-    if (in_token) {
-        // Because input[input.len - 1] is guaranteed to be 0,
-        // this token safely acts as a valid [*:0]const u8!
-        const ptr: [*:0]const u8 = @ptrCast(&input[token_start]);
-        try tokens.append(allocator, ptr);
-    }
+    try file_utils.tokenizeInPlace(allocator, &tokens, input, delim_char);
 
     // perform actual shuffle
     var diag = zhuf_utils.ZhuffleDiagnostic{};
