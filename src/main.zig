@@ -3,13 +3,27 @@ const KvCli = @import("kv_cli.zig").KvCli;
 const file_utils = @import("file_utils.zig");
 const zhuf_utils = @import("zhuf_utils.zig");
 
-pub const ShufOptions = struct {
+pub const ZhufOptions = struct {
     seed: ?u64 = null,
     count: ?usize = null,
     delimiter: []const u8 = "\n",
     algo: ?[]const u8 = null,
     @"if": ?[]const u8 = null,
     of: ?[]const u8 = null,
+};
+
+pub const ZhufFlags = struct {
+    help: bool = false,
+    nonewline: bool = false,
+
+    pub const aliases = .{
+        .{ "-h", "help" },
+        .{ "-help", "help" },
+        .{ "--help", "help" },
+        .{ "-n", "nonewline" },
+        .{ "-nonewline", "nonewline" },
+        .{ "--no-newline", "nonewline" },
+    };
 };
 
 fn printHelp() void {
@@ -36,8 +50,8 @@ fn printHelp() void {
         \\                           xoshiro256
         \\                           (Omitting 'algo' falls back to default PRNG)
         \\
-        \\  -n, -nonewline         Omit new line at the end of output
-        \\  -h, -help              Display this help text and exit
+        \\  -n, -nonewline, --no-newline    Omit new line at the end of output
+        \\  -h, -help, --help               Display this help text and exit
         \\
     ;
     std.debug.print("{s}", .{help_text});
@@ -49,34 +63,28 @@ pub fn main(init: std.process.Init) !void {
     const allocator = arena.allocator();
 
     const args = try init.minimal.args.toSlice(allocator);
-    var newline = true;
 
-    // filter non-kv flags during pre-pass scan
-    var kv_args: std.ArrayListUnmanaged([]const u8) = .empty;
-    try kv_args.append(allocator, args[0]); // keep binary name at index 0
-
-    for (args[1..]) |arg| {
-        if (std.mem.eql(u8, arg, "-help") or std.mem.eql(u8, arg, "-h")) {
-            printHelp();
-            return;
-        } else if (std.mem.eql(u8, arg, "-nonewline") or std.mem.eql(u8, arg, "-n")) {
-            newline = false;
-        } else {
-            try kv_args.append(allocator, arg);
-        }
-    }
-
-    const opts = KvCli.parseStruct(ShufOptions, allocator, kv_args.items) catch |err| {
+    const parsed = KvCli.parse(ZhufOptions, ZhufFlags, allocator, args) catch |err| {
         std.debug.print("\x1b[91merror\x1b[0m parsing CLI options: {s}\n\n", .{@errorName(err)});
         printHelp();
         return;
     };
 
+    if (parsed.flags.help) {
+        printHelp();
+        return;
+    }
+
     // read file or stdin into buffer
-    const input = try file_utils.readToBuffer(allocator, init.io, opts.@"if");
+    const input = try file_utils.readToBuffer(allocator, init.io, parsed.opts.@"if");
 
     // handle delimiter including possible null character
-    const delim_char = if (std.mem.eql(u8, opts.delimiter, "null")) 0 else if (opts.delimiter.len > 0) opts.delimiter[0] else '\n';
+    const delim_char = if (std.mem.eql(u8, parsed.opts.delimiter, "null"))
+        0
+    else if (parsed.opts.delimiter.len > 0)
+        parsed.opts.delimiter[0]
+    else
+        '\n';
 
     // estimate total number of tokens for preallocation
     var tokens: std.ArrayListUnmanaged([*:0]const u8) = .empty;
@@ -87,8 +95,8 @@ pub fn main(init: std.process.Init) !void {
 
     // perform actual shuffle
     var diag = zhuf_utils.ZhuffleDiagnostic{};
-    const limit = if (opts.count) |c| @min(c, tokens.items.len) else tokens.items.len;
-    try zhuf_utils.zhuffle(opts.algo, tokens, limit, opts.seed, init.io, allocator, &diag);
+    const limit = if (parsed.opts.count) |c| @min(c, tokens.items.len) else tokens.items.len;
+    try zhuf_utils.zhuffle(parsed.opts.algo, tokens, limit, parsed.opts.seed, init.io, allocator, &diag);
 
     if (diag.unused_seed) {
         std.debug.print("\x1b[93mWarning:\x1b[0m A custom seed was provided but is ignored by the deterministic algorithm.\n", .{});
@@ -127,7 +135,7 @@ pub fn main(init: std.process.Init) !void {
             dest_ptr[0] = src_ptr[0];
         }
 
-        if (newline) {
+        if (!parsed.flags.nonewline) {
             dest_ptr[0] = '\n';
             dest_ptr += 1;
         }
@@ -135,6 +143,6 @@ pub fn main(init: std.process.Init) !void {
         // inform ArrayList how many elements we wrote manually
         output_buf.items.len = (@intFromPtr(dest_ptr) - @intFromPtr(base_start));
 
-        try file_utils.writeFromBufferBuffered(init.io, opts.of, output_buf.items);
+        try file_utils.writeFromBufferBuffered(init.io, parsed.opts.of, output_buf.items);
     }
 }

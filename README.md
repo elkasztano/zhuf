@@ -55,8 +55,8 @@ rm -v ~/bin/zhuf
 
 ## Usage Syntax
 
-```bash
-zhuf [options] [-n | -nonewline] [-h | -help]
+```
+zhuf [options] [-n | -nonewline | --no-newline] [-h | -help | --help]
 ```
 
 ### Options (`key=value`)
@@ -72,10 +72,10 @@ zhuf [options] [-n | -nonewline] [-h | -help]
 
 ### Flags
 
-| Flag | Short | Description |
-| :--- | :--- | :--- |
-| `-nonewline` | `-n` | Omit trailing newline at the end of output. |
-| `-help` | `-h` | Display usage options and exit. |
+| Flag | Description |
+| :--- | :--- |
+| `-n`, `-nonewline`, `--no-newline` | Omit trailing newline at the end of output. |
+| `-h`, `-help`, `--help` | Display usage options and exit. |
 
 ---
 
