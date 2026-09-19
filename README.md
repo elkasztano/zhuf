@@ -12,6 +12,7 @@
 * **Pseudo-Random Shuffling**: Fast PRNG algorithms (`xoroshiro128`, `xoshiro256`, or default PRNG) with customizable or secure fallback seeding.
 * **Deterministic Shuffling**: Multi-pass algorithms (`milk`, `monge`, `faro`) with optional iteration counts (e.g., `algo=milk:5`).
 * **Output Limit & Formatting Control**: Limit output count (`count=N`, supports size suffixes) and omit trailing newlines (`-n`).
+* **Shuffle Positional Arguments**: Shuffle positional arguments instead of stream input. (`-e`).
 
 The `dd`-style size suffixes are a quirky leftover from a previous project.
 
@@ -74,6 +75,7 @@ zhuf [options] [-n | -nonewline | --no-newline] [-h | -help | --help]
 
 | Flag | Description |
 | :--- | :--- |
+| `-e`, `-echo`, `--echo` | Shuffle positional arguments instead of stream input. |
 | `-n`, `-nonewline`, `--no-newline` | Omit trailing newline at the end of output. |
 | `-h`, `-help`, `--help` | Display usage options and exit. |
 
@@ -130,4 +132,10 @@ zhuf if=test.txt seed=98765 algo=xoshiro256
 Shuffle null-delimited tokens:
 ```bash
 find . -type f -print0 | zhuf delimiter=null | tr '\0' '\n'
+```
+
+### Shuffle positional arguments
+Shuffle positional arguments using the `--echo` flag:
+```bash
+zhuf --echo alpha beta gamma delta
 ```

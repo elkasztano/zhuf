@@ -15,6 +15,7 @@ pub const ZhufOptions = struct {
 pub const ZhufFlags = struct {
     help: bool = false,
     nonewline: bool = false,
+    echo: bool = false,
 
     pub const aliases = .{
         .{ "-h", "help" },
@@ -23,6 +24,9 @@ pub const ZhufFlags = struct {
         .{ "-n", "nonewline" },
         .{ "-nonewline", "nonewline" },
         .{ "--no-newline", "nonewline" },
+        .{ "-e", "echo" },
+        .{ "-echo", "echo" },
+        .{ "--echo", "echo" },
     };
 };
 
@@ -50,6 +54,8 @@ fn printHelp() void {
         \\                           xoshiro256
         \\                           (Omitting 'algo' falls back to default PRNG)
         \\
+        \\  -e, -echo, --echo               Treat positional arguments as tokens
+        \\                                  Ignores 'if=' option
         \\  -n, -nonewline, --no-newline    Omit new line at the end of output
         \\  -h, -help, --help               Display this help text and exit
         \\
@@ -75,9 +81,6 @@ pub fn main(init: std.process.Init) !void {
         return;
     }
 
-    // read file or stdin into buffer
-    const input = try file_utils.readToBuffer(allocator, init.io, parsed.opts.@"if");
-
     // handle delimiter including possible null character
     const delim_char = if (std.mem.eql(u8, parsed.opts.delimiter, "null"))
         0
@@ -86,12 +89,25 @@ pub fn main(init: std.process.Init) !void {
     else
         '\n';
 
-    // estimate total number of tokens for preallocation
     var tokens: std.ArrayListUnmanaged([*:0]const u8) = .empty;
-    const estimated_tokens = input.len / 7;
-    try tokens.ensureTotalCapacity(allocator, estimated_tokens);
+    var output_len: usize = undefined;
 
-    try file_utils.tokenizeInPlace(allocator, &tokens, input, delim_char);
+    if (parsed.flags.echo) {
+        tokens = parsed.positionals;
+        output_len = computeTotalOutputLenNull(tokens.items, parsed.opts.delimiter.len);
+    } else {
+
+        // read file or stdin into buffer
+        const input = try file_utils.readToBuffer(allocator, init.io, parsed.opts.@"if");
+
+        // estimate total number of tokens for preallocation
+        const estimated_tokens = input.len / 7;
+        try tokens.ensureTotalCapacity(allocator, estimated_tokens);
+
+        try file_utils.tokenizeInPlace(allocator, &tokens, input, delim_char);
+
+        output_len = input.len + 2;
+    }
 
     // perform actual shuffle
     var diag = zhuf_utils.ZhuffleDiagnostic{};
@@ -104,7 +120,7 @@ pub fn main(init: std.process.Init) !void {
 
     if (limit > 0) {
         var output_buf: std.ArrayListUnmanaged(u8) = .empty;
-        try output_buf.ensureTotalCapacityPrecise(allocator, input.len + 2);
+        try output_buf.ensureTotalCapacityPrecise(allocator, output_len);
 
         var dest_ptr = output_buf.unusedCapacitySlice().ptr;
         const base_start = dest_ptr;
@@ -145,4 +161,13 @@ pub fn main(init: std.process.Init) !void {
 
         try file_utils.writeFromBufferBuffered(init.io, parsed.opts.of, output_buf.items);
     }
+}
+
+/// Compute output length for all null-terminated positional arguments
+fn computeTotalOutputLenNull(args: []const [*:0]const u8, delimiter_len: usize) usize {
+    var total_bytes: usize = 0;
+    for (args) |arg| {
+        total_bytes += std.mem.len(arg) + delimiter_len;
+    }
+    return total_bytes;
 }

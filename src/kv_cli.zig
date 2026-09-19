@@ -9,17 +9,19 @@ pub const KvCli = struct {
         InvalidEnum,
         InvalidBoolean,
         MissingRequiredOption,
+        OutOfMemory,
     };
 
     pub fn ParseResult(comptime Opts: type, comptime Flags: type) type {
         return struct {
             opts: Opts,
             flags: Flags,
+            positionals: std.ArrayListUnmanaged([*:0]const u8),
         };
     }
 
-    /// Parses command-line arguments. Key-value options are stored in `Opts`,
-    /// while standalone boolean flags (`-h`, `--help`) are stored in `Flags`.
+    /// Parses command-line arguments. Key-value options are stored in `opts`,
+    /// standalone boolean flags in `flags`, and positional arguments in `positionals`.
     pub fn parse(
         comptime Opts: type,
         comptime Flags: type,
@@ -28,6 +30,9 @@ pub const KvCli = struct {
     ) ParseError!ParseResult(Opts, Flags) {
         var opts: Opts = undefined;
         var flags: Flags = initDefaults(Flags);
+
+        var positionals: std.ArrayListUnmanaged([*:0]const u8) = .empty;
+        errdefer positionals.deinit(allocator);
 
         const opts_info = @typeInfo(Opts).@"struct";
         var field_set = [_]bool{false} ** opts_info.fields.len;
@@ -41,8 +46,20 @@ pub const KvCli = struct {
                 const val = arg[eq_index + 1 ..];
 
                 var matched = false;
+
+                // Resolve key alias if present
+                var resolved_key = key;
+                if (@hasDecl(Opts, "aliases")) {
+                    inline for (Opts.aliases) |alias| {
+                        if (std.mem.eql(u8, key, alias[0])) {
+                            resolved_key = alias[1];
+                            break;
+                        }
+                    }
+                }
+
                 inline for (opts_info.fields, 0..) |field, i| {
-                    if (std.mem.eql(u8, field.name, key)) {
+                    if (std.mem.eql(u8, field.name, resolved_key)) {
                         matched = true;
                         field_set[i] = true;
                         @field(opts, field.name) = try parseValue(field.type, allocator, val);
@@ -52,39 +69,48 @@ pub const KvCli = struct {
 
                 if (!matched) return ParseError.UnknownKey;
             } else {
-                // handle flags
-                if (Flags == void) return ParseError.UnknownKey;
-
+                // Try matching flag or alias
                 var flag_matched = false;
 
-                // check alias mappings
-                if (@hasDecl(Flags, "aliases")) {
-                    inline for (Flags.aliases) |alias| {
-                        if (std.mem.eql(u8, arg, alias[0])) {
-                            @field(flags, alias[1]) = true;
-                            flag_matched = true;
-                            break;
+                if (Flags != void) {
+                    // Check alias mappings
+                    if (@hasDecl(Flags, "aliases")) {
+                        inline for (Flags.aliases) |alias| {
+                            if (std.mem.eql(u8, arg, alias[0])) {
+                                @field(flags, alias[1]) = true;
+                                flag_matched = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    // Fall back to direct "--field_name" matching
+                    if (!flag_matched and std.mem.startsWith(u8, arg, "--")) {
+                        const flag_name = arg[2..];
+                        inline for (@typeInfo(Flags).@"struct".fields) |field| {
+                            if (std.mem.eql(u8, field.name, flag_name)) {
+                                @field(flags, field.name) = true;
+                                flag_matched = true;
+                                break;
+                            }
                         }
                     }
                 }
 
-                // fall back to direct "--field_name" matching
-                if (!flag_matched and std.mem.startsWith(u8, arg, "--")) {
-                    const flag_name = arg[2..];
-                    inline for (@typeInfo(Flags).@"struct".fields) |field| {
-                        if (std.mem.eql(u8, field.name, flag_name)) {
-                            @field(flags, field.name) = true;
-                            flag_matched = true;
-                            break;
-                        }
+                if (!flag_matched) {
+                    if (std.mem.startsWith(u8, arg, "-")) {
+                        // Any argument starting with '-' that isn't a recognized flag is an error
+                        return ParseError.UnknownFlag;
+                    } else {
+                        // Unnamed positional argument
+                        const z_arg: [:0]const u8 = arg[0..arg.len :0];
+                        try positionals.append(allocator, z_arg);
                     }
                 }
-
-                if (!flag_matched) return ParseError.UnknownFlag;
             }
         }
 
-        // assign default values or fail on missing required options
+        // Assign default values or fail on missing required options
         inline for (opts_info.fields, 0..) |field, i| {
             if (!field_set[i]) {
                 if (field.default_value_ptr) |ptr| {
@@ -98,7 +124,11 @@ pub const KvCli = struct {
             }
         }
 
-        return .{ .opts = opts, .flags = flags };
+        return .{
+            .opts = opts,
+            .flags = flags,
+            .positionals = positionals,
+        };
     }
 
     fn initDefaults(comptime T: type) T {
