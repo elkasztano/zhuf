@@ -70,7 +70,8 @@ rm -v ~/bin/zhuf
 ## Usage Syntax
 
 ```
-zhuf [options] [-n | -nonewline | --no-newline] [-h | -help | --help]
+zhuf [options]
+zhuf -e [options] [arg...]
 ```
 
 ### Options (`key=value`)
