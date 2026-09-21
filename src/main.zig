@@ -82,92 +82,61 @@ pub fn main(init: std.process.Init) !void {
     }
 
     // handle delimiter including possible null character
-    const delim_char = if (std.mem.eql(u8, parsed.opts.delimiter, "null"))
+    const delim_char: u8 = if (std.mem.eql(u8, parsed.opts.delimiter, "null"))
         0
     else if (parsed.opts.delimiter.len > 0)
         parsed.opts.delimiter[0]
     else
         '\n';
 
-    var tokens: std.ArrayListUnmanaged([*:0]const u8) = .empty;
+    var tokens: file_utils.TokenList = undefined;
     var output_len: usize = undefined;
+    var input_buf: []u8 = undefined;
 
     if (parsed.flags.echo) {
-        tokens = parsed.positionals;
-        output_len = computeTotalOutputLenNull(tokens.items, parsed.opts.delimiter.len);
-    } else {
+        input_buf = try file_utils.readArgsToBuffer(allocator, parsed.positionals.items);
+        const estimated_tokens = 16;
+        tokens = try file_utils.TokenList.initCapacity(allocator, input_buf.len, estimated_tokens);
 
+        // positional parameters are always zero terminated
+        try file_utils.tokenizeInPlace(allocator, &tokens, input_buf, 0);
+
+        output_len = input_buf.len + 2;
+    } else {
         // read file or stdin into buffer
-        const input = try file_utils.readToBuffer(allocator, init.io, parsed.opts.@"if");
+        input_buf = try file_utils.readToBuffer(allocator, init.io, parsed.opts.@"if");
 
         // estimate total number of tokens for preallocation
-        const estimated_tokens = input.len / 7;
-        try tokens.ensureTotalCapacity(allocator, estimated_tokens);
+        const estimated_tokens = input_buf.len / 7;
+        tokens = try file_utils.TokenList.initCapacity(allocator, input_buf.len, estimated_tokens);
 
-        try file_utils.tokenizeInPlace(allocator, &tokens, input, delim_char);
+        try file_utils.tokenizeInPlace(allocator, &tokens, input_buf, delim_char);
 
-        output_len = input.len + 2;
+        output_len = input_buf.len + 2;
     }
 
     // perform actual shuffle
     var diag = zhuf_utils.ZhuffleDiagnostic{};
-    const limit = if (parsed.opts.count) |c| @min(c, tokens.items.len) else tokens.items.len;
-    try zhuf_utils.zhuffle(parsed.opts.algo, tokens, limit, parsed.opts.seed, init.io, allocator, &diag);
+    const total_tokens = tokens.len();
+    const limit = if (parsed.opts.count) |c| @min(c, total_tokens) else total_tokens;
+
+    try zhuf_utils.zhuffle(parsed.opts.algo, &tokens, limit, parsed.opts.seed, init.io, allocator, &diag);
 
     if (diag.unused_seed) {
         std.debug.print("\x1b[93mWarning:\x1b[0m A custom seed was provided but is ignored by the deterministic algorithm.\n", .{});
     }
 
     if (limit > 0) {
-        var output_buf: std.ArrayListUnmanaged(u8) = .empty;
-        try output_buf.ensureTotalCapacityPrecise(allocator, output_len);
-
-        var dest_ptr = output_buf.unusedCapacitySlice().ptr;
-        const base_start = dest_ptr;
-
-        for (tokens.items[0..(limit - 1)]) |token| {
-            // cast the sentinel pointer to a raw byte pointer
-            var src_ptr: [*]const u8 = @ptrCast(token);
-
-            // loop-copy bytes directly until we hit null byte
-            while (src_ptr[0] != 0) : ({
-                src_ptr += 1;
-                dest_ptr += 1;
-            }) {
-                dest_ptr[0] = src_ptr[0];
-            }
-
-            // append the delimiter character in place
-            dest_ptr[0] = delim_char;
-            dest_ptr += 1;
-        }
-
-        // handle final token
-        var src_ptr: [*]const u8 = @ptrCast(tokens.items[limit - 1]);
-        while (src_ptr[0] != 0) : ({
-            src_ptr += 1;
-            dest_ptr += 1;
-        }) {
-            dest_ptr[0] = src_ptr[0];
-        }
-
-        if (!parsed.flags.nonewline) {
-            dest_ptr[0] = '\n';
-            dest_ptr += 1;
-        }
-
-        // inform ArrayList how many elements we wrote manually
-        output_buf.items.len = (@intFromPtr(dest_ptr) - @intFromPtr(base_start));
-
-        try file_utils.writeFromBufferBuffered(init.io, parsed.opts.of, output_buf.items);
+        try file_utils.formatAndWriteTokens(
+            tokens,
+            input_buf,
+            limit,
+            output_len,
+            delim_char,
+            parsed.flags.nonewline,
+            parsed.opts.of,
+            init.io,
+            allocator,
+        );
     }
-}
-
-/// Compute output length for all null-terminated positional arguments
-fn computeTotalOutputLenNull(args: []const [*:0]const u8, delimiter_len: usize) usize {
-    var total_bytes: usize = 0;
-    for (args) |arg| {
-        total_bytes += std.mem.len(arg) + delimiter_len;
-    }
-    return total_bytes;
 }

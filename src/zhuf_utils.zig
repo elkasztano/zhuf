@@ -1,4 +1,5 @@
 const std = @import("std");
+const file_utils = @import("file_utils.zig");
 
 pub const ZhuffleDiagnostic = struct {
     unused_seed: bool = false,
@@ -24,7 +25,7 @@ const ShuffleAlgo = enum {
 };
 
 /// Performs a single round of the Milk shuffle.
-fn shuffleMilk(items: [][*:0]const u8, buffer: [][*:0]const u8) void {
+fn shuffleMilk(comptime T: type, items: []const T, buffer: []T) void {
     var left: usize = 0;
     var right: usize = items.len - 1;
     var i: usize = 0;
@@ -41,7 +42,7 @@ fn shuffleMilk(items: [][*:0]const u8, buffer: [][*:0]const u8) void {
 }
 
 /// Performs a single round of the Monge shuffle.
-fn shuffleMonge(items: [][*:0]const u8, buffer: [][*:0]const u8) void {
+fn shuffleMonge(comptime T: type, items: []const T, buffer: []T) void {
     var left: usize = 0;
     var right: usize = items.len - 1;
     var i: usize = items.len;
@@ -58,7 +59,7 @@ fn shuffleMonge(items: [][*:0]const u8, buffer: [][*:0]const u8) void {
 }
 
 /// Performs a single round of a perfect Faro Out-Shuffle.
-fn shuffleFaro(items: [][*:0]const u8, buffer: [][*:0]const u8) void {
+fn shuffleFaro(comptime T: type, items: []const T, buffer: []T) void {
     const half = (items.len + 1) / 2;
     var i: usize = 0;
     while (i < half) : (i += 1) {
@@ -92,15 +93,29 @@ fn sampleWithoutReplacement(r: std.Random, comptime T: type, buf: []T, n: usize)
 
 pub fn zhuffle(
     opt_algo: ?[]const u8,
-    tokens: std.ArrayListUnmanaged([*:0]const u8),
-    n: usize, // <-- Added target count 'n'
+    tokens: *file_utils.TokenList,
+    n: usize,
     opt_seed: ?u64,
     io: std.Io,
     allocator: std.mem.Allocator,
     diag: ?*ZhuffleDiagnostic,
 ) !void {
-    const items = tokens.items;
+    switch (tokens.*) {
+        .u32_list => |*l| try zhuffleInternal(u32, opt_algo, l.items, n, opt_seed, io, allocator, diag),
+        .u64_list => |*l| try zhuffleInternal(u64, opt_algo, l.items, n, opt_seed, io, allocator, diag),
+    }
+}
 
+fn zhuffleInternal(
+    comptime T: type,
+    opt_algo: ?[]const u8,
+    items: []T,
+    n: usize,
+    opt_seed: ?u64,
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    diag: ?*ZhuffleDiagnostic,
+) !void {
     // fallback when opt_algo is totally absent
     if (opt_algo == null) {
         var seed_val: u64 = undefined;
@@ -113,7 +128,7 @@ pub fn zhuffle(
             };
         }
         var prng = std.Random.DefaultPrng.init(seed_val);
-        sampleWithoutReplacement(prng.random(), [*:0]const u8, items, n);
+        sampleWithoutReplacement(prng.random(), T, items, n);
         return;
     }
 
@@ -134,21 +149,22 @@ pub fn zhuffle(
     const algo = ShuffleAlgo.parse(algo_name) orelse return error.UnknownAlgorithm;
 
     switch (algo) {
-        // deterministic multi round mechanics (Unchanged: must evaluate the full array length)
+        // deterministic multi round mechanics
         .milk, .monge, .faro => {
             if (opt_seed != null and diag != null) {
                 diag.?.unused_seed = true;
             }
 
-            const buffer = try allocator.alloc([*:0]const u8, items.len);
+            // Temporary buffer scales directly with T (e.g., 4 bytes per item for u32)
+            const buffer = try allocator.alloc(T, items.len);
             defer allocator.free(buffer);
 
             var round: usize = 0;
             while (round < iterations) : (round += 1) {
                 switch (algo) {
-                    .milk => shuffleMilk(items, buffer),
-                    .monge => shuffleMonge(items, buffer),
-                    .faro => shuffleFaro(items, buffer),
+                    .milk => shuffleMilk(T, items, buffer),
+                    .monge => shuffleMonge(T, items, buffer),
+                    .faro => shuffleFaro(T, items, buffer),
                     else => unreachable,
                 }
                 @memcpy(items, buffer);
@@ -169,10 +185,10 @@ pub fn zhuffle(
 
             if (algo == .xoroshiro128) {
                 var prng = std.Random.Xoroshiro128.init(seed_val);
-                sampleWithoutReplacement(prng.random(), [*:0]const u8, items, n);
+                sampleWithoutReplacement(prng.random(), T, items, n);
             } else {
                 var prng = std.Random.Xoshiro256.init(seed_val);
-                sampleWithoutReplacement(prng.random(), [*:0]const u8, items, n);
+                sampleWithoutReplacement(prng.random(), T, items, n);
             }
         },
     }

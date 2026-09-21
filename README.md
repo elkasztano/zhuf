@@ -18,6 +18,19 @@ The `dd`-style size suffixes are a quirky leftover from a previous project.
 
 ---
 
+## Memory Architecture & Performance
+
+`zhuf` is optimized for high-throughput stream and file shuffling on large datasets. Rather than allocating individual strings or storing 16-byte slice descriptors (`[]const u8`), `zhuf` reads the entire dataset into a single contiguous buffer and indexes token positions using compact byte offsets relative to the buffer's base address.
+
+### Offset Indexing (`TokenList`)
+
+* **32-Bit Compact Offsets (`u32`):** For input files under 4 GiB, token locations are stored as 32-bit unsigned integers. This reduces memory consumption to **4 bytes per token** (a 50% reduction compared to raw 64-bit pointers and 75% reduction compared to slices).
+* **64-Bit Scaling (`u64`):** When inputs equal or exceed 4 GiB, `zhuf` dynamically selects 64-bit offsets via a zero-cost tagged union (`TokenList`).
+* **In-Place Tokenization:** Delimiters in the primary input buffer are modified in-place to null terminators during single-pass tokenization, eliminating dynamic string allocations.
+* **Vectorized Output Formatting:** Output assembly resolves offset boundaries into contiguous string spans, leveraging compiler SIMD vectorization (`@memcpy`) to fill output buffers before flushing to standard output or disk.
+
+---
+
 ## Requirements
 
 * **Zig Compiler**: Version `0.16.0`.
