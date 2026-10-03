@@ -1,6 +1,6 @@
 # zhuf
 
-`zhuf` is a high-performance key-value command-line shuffling utility written in Zig 0.16.0. It processes streams or files, tokenizes them by custom delimiters, and rearranges items using either pseudo-random generators or multi-round deterministic card-shuffling algorithms.
+`zhuf` is a high-performance key-value command-line shuffling utility written in Zig 0.17.0. It processes streams or files, tokenizes them by custom delimiters, and rearranges items using either pseudo-random generators or multi-round deterministic card-shuffling algorithms.
 
 ---
 
@@ -33,7 +33,7 @@ The `dd`-style size suffixes are a quirky leftover from a previous project.
 
 ## Requirements
 
-* **Zig Compiler**: Version `0.16.0`.
+* **Zig Compiler**: Version `0.17.0`.
 
 ---
 

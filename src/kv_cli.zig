@@ -35,7 +35,7 @@ pub const KvCli = struct {
         errdefer positionals.deinit(allocator);
 
         const opts_info = @typeInfo(Opts).@"struct";
-        var field_set = [_]bool{false} ** opts_info.fields.len;
+        var field_set: [opts_info.field_names.len]bool = @splat(false);
 
         const slice = if (args.len > 0) args[1..] else args;
 
@@ -58,11 +58,15 @@ pub const KvCli = struct {
                     }
                 }
 
-                inline for (opts_info.fields, 0..) |field, i| {
-                    if (std.mem.eql(u8, field.name, resolved_key)) {
+                inline for (
+                    opts_info.field_names,
+                    opts_info.field_types,
+                    0..,
+                    ) |field_name, field_type, i| {
+                    if (std.mem.eql(u8, field_name, resolved_key)) {
                         matched = true;
                         field_set[i] = true;
-                        @field(opts, field.name) = try parseValue(field.type, allocator, val);
+                        @field(opts, field_name) = try parseValue(field_type, allocator, val);
                         break;
                     }
                 }
@@ -87,9 +91,9 @@ pub const KvCli = struct {
                     // Fall back to direct "--field_name" matching
                     if (!flag_matched and std.mem.startsWith(u8, arg, "--")) {
                         const flag_name = arg[2..];
-                        inline for (@typeInfo(Flags).@"struct".fields) |field| {
-                            if (std.mem.eql(u8, field.name, flag_name)) {
-                                @field(flags, field.name) = true;
+                        inline for (@typeInfo(Flags).@"struct".field_names) |field_name| {
+                            if (std.mem.eql(u8, field_name, flag_name)) {
+                                @field(flags, field_name) = true;
                                 flag_matched = true;
                                 break;
                             }
@@ -111,13 +115,18 @@ pub const KvCli = struct {
         }
 
         // Assign default values or fail on missing required options
-        inline for (opts_info.fields, 0..) |field, i| {
+        inline for (
+            opts_info.field_names,
+            opts_info.field_types,
+            opts_info.field_attrs,
+            0..,
+            ) |field_name, field_type, field_attr, i| {
             if (!field_set[i]) {
-                if (field.default_value_ptr) |ptr| {
-                    const default_ptr: *const field.type = @ptrCast(@alignCast(ptr));
-                    @field(opts, field.name) = default_ptr.*;
-                } else if (@typeInfo(field.type) == .optional) {
-                    @field(opts, field.name) = null;
+                if (field_attr.default_value_ptr) |ptr| {
+                    const default_ptr: *const field_type = @ptrCast(@alignCast(ptr));
+                    @field(opts, field_name) = default_ptr.*;
+                } else if (@typeInfo(field_type) == .optional) {
+                    @field(opts, field_name) = null;
                 } else {
                     return ParseError.MissingRequiredOption;
                 }
@@ -134,12 +143,16 @@ pub const KvCli = struct {
     fn initDefaults(comptime T: type) T {
         if (T == void) return {};
         var result: T = undefined;
-        inline for (@typeInfo(T).@"struct".fields) |field| {
-            if (field.default_value_ptr) |ptr| {
-                const default_ptr: *const field.type = @ptrCast(@alignCast(ptr));
-                @field(result, field.name) = default_ptr.*;
-            } else if (field.type == bool) {
-                @field(result, field.name) = false;
+        inline for (
+            @typeInfo(T).@"struct".field_names,
+            @typeInfo(T).@"struct".field_types,
+            @typeInfo(T).@"struct".field_attrs,
+            ) |field_name, field_type, field_attr| {
+            if (field_attr.default_value_ptr) |ptr| {
+                const default_ptr: *const field_type = @ptrCast(@alignCast(ptr));
+                @field(result, field_name) = default_ptr.*;
+            } else if (field_type == bool) {
+                @field(result, field_name) = false;
             }
         }
         return result;
